@@ -1,4 +1,5 @@
-![crates.io badge](https://img.shields.io/crates/v/impl-enum)
+[![crates.io badge](https://img.shields.io/crates/v/impl-enum)](https://crates.io/crates/impl-enum)
+[![docs.rs badge](https://docs.rs/impl-enum/badge.svg)](https://docs.rs/impl-enum)
 
 Contains a proc macro attribute `impl_enum::with_methods` for generating methods on an enum that call the same method on each variant.
 
