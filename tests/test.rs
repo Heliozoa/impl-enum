@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 #[impl_enum::with_methods {
-    fn len(&self) -> usize;
+    fn len(&self) -> usize {}
 }]
 enum Enum {
     Vec { vec: Vec<u8> },

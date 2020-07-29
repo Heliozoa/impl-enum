@@ -1,10 +1,14 @@
+//! The variant of the writer is dynamically selected with an environment variable.
+//! Using the macro, we get the convenience of a trait object with the performance of an enum.
+
 use std::env;
 use std::fs::File;
 use std::io::Cursor;
 use std::io::Write;
 
 #[impl_enum::with_methods {
-    fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error>;
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error> {}
+    pub fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {}
 }]
 enum Writer {
     Cursor(Cursor<Vec<u8>>),
@@ -12,14 +16,14 @@ enum Writer {
 }
 
 fn get_writer() -> Writer {
-    if env::var("USE_CURSOR").is_ok() {
-        Writer::Cursor(Cursor::new(vec![]))
+    if let Ok(path) = env::var("WRITER_FILE") {
+        Writer::File(File::create(path).unwrap())
     } else {
-        Writer::File(File::create("some.log").unwrap())
+        Writer::Cursor(Cursor::new(vec![]))
     }
 }
 
 fn main() {
     let mut writer = get_writer();
-    writer.write_all("hello!".as_bytes()).unwrap();
+    writer.write_all(b"hello!").unwrap();
 }

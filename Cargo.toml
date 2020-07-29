@@ -6,7 +6,7 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/Heliozoa/impl-enum"
-description = "Macro for generating methods on an enum that call the same method on each variant"
+description = "Macro for generating methods on an enum that match on the enum and call the same method on each variant."
 keywords = ["macro", "enum", "methods"]
 categories = ["rust-patterns"]
 
