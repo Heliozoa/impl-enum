@@ -12,12 +12,14 @@ use std::io::Write;
 }]
 enum Writer {
     Cursor(Cursor<Vec<u8>>),
-    File(File),
+    File { file: std::fs::File },
 }
 
 fn get_writer() -> Writer {
     if let Ok(path) = env::var("WRITER_FILE") {
-        Writer::File(File::create(path).unwrap())
+        Writer::File {
+            file: File::create(path).unwrap(),
+        }
     } else {
         Writer::Cursor(Cursor::new(vec![]))
     }

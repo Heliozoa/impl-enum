@@ -2,11 +2,22 @@ use std::collections::HashSet;
 
 #[impl_enum::with_methods {
     fn len(&self) -> usize {}
+    fn associated_fn(s: &str) {}
 }]
 enum Enum {
     Vec { vec: Vec<u8> },
     Set(HashSet<String>),
 }
+
+trait TestTrait {
+    fn associated_fn(s: &str) {
+        println!("{}", s);
+    }
+}
+
+impl<T> TestTrait for Vec<T> {}
+
+impl<T> TestTrait for HashSet<T> {}
 
 #[test]
 fn test() {
@@ -20,4 +31,6 @@ fn test() {
     set.insert("bcde".to_string());
     let e = Enum::Set(set);
     assert_eq!(e.len(), 2);
+
+    e.associated_fn("hello!");
 }

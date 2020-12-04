@@ -66,6 +66,7 @@
 //! Variants with named fields and multiple fields are also supported, the method is always called on the first field and the rest are ignored. Enums with variants with no fields are currently not supported.
 
 use proc_macro::TokenStream;
+use quote::ToTokens;
 use syn::{
     parse::{Error, Parse, ParseStream},
     spanned::Spanned,
@@ -123,19 +124,43 @@ impl Parse for Methods {
 // generates the method's block and sets the input_method's block to it
 fn add_block_to_fn(input_method: &mut ItemFn, input_enum: &ItemEnum) -> Result<(), MacroError> {
     let method_ident = &input_method.sig.ident;
-    // ignore all byt typed args with ident, this is hopefully ok
+    let mut has_self_arg = false;
     let method_arg_idents: Vec<_> = input_method
         .sig
         .inputs
         .iter()
         .filter_map(|i| match i {
             FnArg::Typed(t) => match &*t.pat {
-                Pat::Ident(i) => Some(&i.ident),
+                Pat::Ident(i) => {
+                    if i.ident == "self" {
+                        has_self_arg = true;
+                        None
+                    } else {
+                        Some(i.ident.to_token_stream())
+                    }
+                }
                 _ => None,
             },
-            FnArg::Receiver(_) => None,
+            FnArg::Receiver(_) => {
+                has_self_arg = true;
+                None
+            }
         })
         .collect();
+
+    let and = syn::Token![&](method_ident.span());
+    let self_token = syn::Token![self](method_ident.span());
+    if !has_self_arg {
+        input_method.sig.inputs.insert(
+            0,
+            FnArg::Receiver(syn::Receiver {
+                attrs: vec![],
+                reference: Some((and, None)),
+                mutability: None,
+                self_token,
+            }),
+        );
+    }
 
     // make match arm for every variant
     let mut match_arms = vec![];
@@ -144,29 +169,72 @@ fn add_block_to_fn(input_method: &mut ItemFn, input_enum: &ItemEnum) -> Result<(
         match &variant.fields {
             // named fields, call on first field or error if no fields
             Fields::Named(fields) => {
-                let first_field = fields
+                let mut first_field = fields
                     .named
                     .first()
                     .ok_or_else(|| MacroError {
                         span: Box::new(fields.clone()),
                         message: "variants must have at least one field".to_string(),
                     })?
-                    .ident
-                    .as_ref()
-                    .unwrap(); // hopefully ok
-                match_arms.push(quote::quote! {
-                    Self::#variant_ident { #first_field, .. } => #first_field.#method_ident ( #(#method_arg_idents,)* )
-                });
+                    .clone();
+                let path = if let syn::Type::Path(path) = &mut first_field.ty {
+                    path
+                } else {
+                    panic!();
+                };
+                for seg in &mut path.path.segments {
+                    if let syn::PathArguments::AngleBracketed(gen) = &mut seg.arguments {
+                        let colon2 = syn::Token![::](gen.span());
+                        gen.colon2_token = Some(colon2);
+                    }
+                }
+                let first_field_ident = first_field.ident.as_ref().unwrap();
+                let first_field_type = &first_field.ty;
+
+                let match_arm = if has_self_arg {
+                    quote::quote! {
+                        Self::#variant_ident { #first_field_ident, .. } => #first_field_type :: #method_ident (#first_field_ident, #(#method_arg_idents,)* )
+                    }
+                } else {
+                    quote::quote! {
+                        Self::#variant_ident { .. } => #first_field_type :: #method_ident (#(#method_arg_idents,)* )
+                    }
+                };
+                match_arms.push(match_arm);
             }
             // unnamed fields, call on first field or error if no fields
             Fields::Unnamed(fields) => {
-                let _first_field = fields.unnamed.first().as_ref().ok_or_else(|| MacroError {
-                    span: Box::new(fields.clone()),
-                    message: "variants must have at least one field".to_string(),
-                })?;
-                match_arms.push(quote::quote! {
-                    Self::#variant_ident ( f_1, .. ) => f_1.#method_ident ( #(#method_arg_idents,)* )
-                });
+                let mut first_field = fields
+                    .unnamed
+                    .first()
+                    .ok_or_else(|| MacroError {
+                        span: Box::new(fields.clone()),
+                        message: "variants must have at least one field".to_string(),
+                    })?
+                    .clone();
+                let path = if let syn::Type::Path(path) = &mut first_field.ty {
+                    path
+                } else {
+                    panic!();
+                };
+                for seg in &mut path.path.segments {
+                    if let syn::PathArguments::AngleBracketed(gen) = &mut seg.arguments {
+                        let colon2 = syn::Token![::](gen.span());
+                        gen.colon2_token = Some(colon2);
+                    }
+                }
+
+                let match_arm = if has_self_arg {
+                    quote::quote! {
+                        Self::#variant_ident ( f_1, .. ) => #first_field :: #method_ident (f_1, #(#method_arg_idents,)* )
+                    }
+                } else {
+                    quote::quote! {
+                        Self::#variant_ident ( .. ) => #first_field :: #method_ident ( #(#method_arg_idents,)* )
+                    }
+                };
+                println!("{}", match_arm);
+                match_arms.push(match_arm);
             }
             // no fields, error
             Fields::Unit => {
