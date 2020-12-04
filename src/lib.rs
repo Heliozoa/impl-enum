@@ -233,7 +233,6 @@ fn add_block_to_fn(input_method: &mut ItemFn, input_enum: &ItemEnum) -> Result<(
                         Self::#variant_ident ( .. ) => #first_field :: #method_ident ( #(#method_arg_idents,)* )
                     }
                 };
-                println!("{}", match_arm);
                 match_arms.push(match_arm);
             }
             // no fields, error
