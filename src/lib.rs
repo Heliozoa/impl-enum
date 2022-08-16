@@ -11,8 +11,8 @@
 //! use std::io::Write;
 //!
 //! #[impl_enum::with_methods {
-//!     fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error> {}
-//!     pub fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {}
+//!     fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error>
+//!     pub fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error>
 //! }]
 //! enum Writer {
 //!     Cursor(Cursor<Vec<u8>>),
@@ -70,183 +70,109 @@ use quote::ToTokens;
 use syn::{
     parse::{Error, Parse, ParseStream},
     spanned::Spanned,
-    Fields, FnArg, ItemEnum, ItemFn, Pat,
+    Fields, FnArg, ItemEnum, ItemFn, Receiver, Signature, Visibility,
 };
 
 /// Generates an impl block for an enum containing the given methods, where the method is a simple match over all the variants, calling the same method on the matched variant's first field.
 #[proc_macro_attribute]
 pub fn with_methods(arg: TokenStream, input: TokenStream) -> TokenStream {
-    let mut input_methods = syn::parse_macro_input!(arg as Methods).0;
+    let input_methods = syn::parse_macro_input!(arg as Methods);
     let input_enum = syn::parse_macro_input!(input as ItemEnum);
 
-    // create methods and collect errors
-    let mut errors = vec![];
-    for method in input_methods.iter_mut() {
-        if let Err(error) = add_block_to_fn(method, &input_enum) {
-            let span = error.span;
-            let message = error.message;
-            errors.push(quote::quote_spanned! {
-                    span.span() => compile_error!(#message);
-            })
+    // construct the methods
+    let mut methods = vec![];
+    for (vis, sig) in input_methods.0 {
+        match make_method(vis, sig, &input_enum) {
+            Ok(method) => methods.push(method),
+            Err(err) => return err.into_compile_error().into(),
         }
     }
 
-    // insert methods in an impl block
+    // construct the impl
     let enum_ident = &input_enum.ident;
+    let (impl_generics, ty_generics, where_clause) = &input_enum.generics.split_for_impl();
     let enum_impl = quote::quote! {
-        impl #enum_ident {
-            #(#input_methods)*
+        impl #impl_generics #enum_ident #ty_generics #where_clause {
+            #(#methods)*
         }
     };
 
-    // return the enum, impl and errors
+    // return the enum and impl
     TokenStream::from(quote::quote! {
         #input_enum
         #enum_impl
-        #(#errors)*
     })
 }
 
-struct Methods(Vec<ItemFn>);
+struct Methods(Vec<(Visibility, Signature)>);
 
 impl Parse for Methods {
     // loop over the input and try to parse functions
     fn parse(input: ParseStream) -> Result<Self, Error> {
         let mut methods = vec![];
         while !input.is_empty() {
-            methods.push(input.parse()?);
+            let vis: Visibility = input.parse()?;
+            let sig: Signature = input.parse()?;
+            methods.push((vis, sig));
         }
 
         Ok(Methods(methods))
     }
 }
 
-// generates the method's block and sets the input_method's block to it
-fn add_block_to_fn(input_method: &mut ItemFn, input_enum: &ItemEnum) -> Result<(), MacroError> {
-    let method_ident = &input_method.sig.ident;
-    let mut has_self_arg = false;
-    let method_arg_idents: Vec<_> = input_method
-        .sig
+fn make_method(vis: Visibility, mut sig: Signature, input_enum: &ItemEnum) -> syn::Result<ItemFn> {
+    let method_ident = &sig.ident;
+
+    // turn receivers to __first
+    let method_call_args: Vec<_> = sig
         .inputs
         .iter()
-        .filter_map(|i| match i {
-            FnArg::Typed(t) => match &*t.pat {
-                Pat::Ident(i) => {
-                    if i.ident == "self" {
-                        has_self_arg = true;
-                        None
-                    } else {
-                        Some(i.ident.to_token_stream())
-                    }
-                }
-                _ => None,
-            },
-            FnArg::Receiver(_) => {
-                has_self_arg = true;
-                None
-            }
+        .map(|fa| match fa {
+            FnArg::Typed(t) => t.pat.to_token_stream(),
+            FnArg::Receiver(Receiver { .. }) => quote::quote! { __first },
         })
         .collect();
-
-    let and = syn::Token![&](method_ident.span());
-    let self_token = syn::Token![self](method_ident.span());
-    if !has_self_arg {
-        input_method.sig.inputs.insert(
-            0,
-            FnArg::Receiver(syn::Receiver {
-                attrs: vec![],
-                reference: Some((and, None)),
-                mutability: None,
-                self_token,
-            }),
-        );
+    // add receiver if none
+    if sig.receiver().is_none() {
+        sig.inputs
+            .insert(0, syn::parse(quote::quote! {&self}.into()).unwrap());
     }
 
     // make match arm for every variant
     let mut match_arms = vec![];
     for variant in &input_enum.variants {
         let variant_ident = &variant.ident;
-        match &variant.fields {
-            // named fields, call on first field or error if no fields
-            Fields::Named(fields) => {
-                let mut first_field = fields
-                    .named
-                    .first()
-                    .ok_or_else(|| MacroError {
-                        span: Box::new(fields.clone()),
-                        message: "variants must have at least one field".to_string(),
-                    })?
-                    .clone();
-                let path = if let syn::Type::Path(path) = &mut first_field.ty {
-                    path
-                } else {
-                    panic!();
-                };
-                for seg in &mut path.path.segments {
-                    if let syn::PathArguments::AngleBracketed(gen) = &mut seg.arguments {
-                        let colon2 = syn::Token![::](gen.span());
-                        gen.colon2_token = Some(colon2);
-                    }
-                }
-                let first_field_ident = first_field.ident.as_ref().unwrap();
-                let first_field_type = &first_field.ty;
-
-                let match_arm = if has_self_arg {
-                    quote::quote! {
-                        Self::#variant_ident { #first_field_ident, .. } => #first_field_type :: #method_ident (#first_field_ident, #(#method_arg_idents,)* )
-                    }
-                } else {
-                    quote::quote! {
-                        Self::#variant_ident { .. } => #first_field_type :: #method_ident (#(#method_arg_idents,)* )
-                    }
-                };
-                match_arms.push(match_arm);
-            }
-            // unnamed fields, call on first field or error if no fields
-            Fields::Unnamed(fields) => {
-                let mut first_field = fields
-                    .unnamed
-                    .first()
-                    .ok_or_else(|| MacroError {
-                        span: Box::new(fields.clone()),
-                        message: "variants must have at least one field".to_string(),
-                    })?
-                    .clone();
-                let path = if let syn::Type::Path(path) = &mut first_field.ty {
-                    path
-                } else {
-                    panic!();
-                };
-                for seg in &mut path.path.segments {
-                    if let syn::PathArguments::AngleBracketed(gen) = &mut seg.arguments {
-                        let colon2 = syn::Token![::](gen.span());
-                        gen.colon2_token = Some(colon2);
-                    }
-                }
-
-                let match_arm = if has_self_arg {
-                    quote::quote! {
-                        Self::#variant_ident ( f_1, .. ) => #first_field :: #method_ident (f_1, #(#method_arg_idents,)* )
-                    }
-                } else {
-                    quote::quote! {
-                        Self::#variant_ident ( .. ) => #first_field :: #method_ident ( #(#method_arg_idents,)* )
-                    }
-                };
-                match_arms.push(match_arm);
-            }
+        let field = match &variant.fields {
+            Fields::Named(fields) => fields.named.first().ok_or_else(|| {
+                Error::new(fields.span(), "Enum variants must have at least one field")
+            })?,
+            Fields::Unnamed(fields) => fields.unnamed.first().ok_or_else(|| {
+                Error::new(fields.span(), "Enum variants must have at least one field")
+            })?,
             // no fields, error
             Fields::Unit => {
-                return Err(MacroError {
-                    span: Box::new(variant.clone()),
-                    message: "variants must have at least one field".to_string(),
-                })
+                return Err(Error::new(
+                    variant.span(),
+                    "Unit variants are not supported",
+                ))
             }
         };
+        let first_field_ident = &field.ident;
+        let first_field_type = &field.ty;
+        let match_arm = if let Some(first_field_ident) = first_field_ident {
+            quote::quote! {
+                    Self::#variant_ident { #first_field_ident: __first, .. } => <#first_field_type> :: #method_ident (#(#method_call_args),* )
+            }
+        } else {
+            quote::quote! {
+                    Self::#variant_ident ( __first, .. ) => <#first_field_type> :: #method_ident (#(#method_call_args),* )
+            }
+        };
+        match_arms.push(match_arm);
     }
 
     // generate new block for the function
-    input_method.block = syn::parse(
+    let block = syn::parse(
         quote::quote!(
             {
                 match self {
@@ -255,15 +181,12 @@ fn add_block_to_fn(input_method: &mut ItemFn, input_enum: &ItemEnum) -> Result<(
             }
         )
         .into(),
-    )
-    .map_err(|e| MacroError {
-        message: e.to_string(),
-        span: Box::new(e.span()),
-    })?;
-    Ok(())
-}
-
-struct MacroError {
-    span: Box<dyn Spanned>,
-    message: String,
+    )?;
+    let method = ItemFn {
+        attrs: vec![],
+        vis,
+        sig,
+        block: Box::new(block),
+    };
+    Ok(method)
 }

@@ -8,8 +8,8 @@ use std::{
 };
 
 #[impl_enum::with_methods {
-    fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error> {}
-    pub fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {}
+    pub fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error>
+    pub fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error>
 }]
 enum Writer {
     Cursor(Cursor<Vec<u8>>),

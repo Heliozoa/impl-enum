@@ -64,3 +64,6 @@ impl Writer {
 This would be simple enough to write manually in this case, but with many variants and methods, maintaining such an impl can become tedious. The macro is intended to make such an enum easier to work with.
 
 Variants with named fields and multiple fields are also supported, the method is always called on the first field and the rest are ignored. Enums with variants with no fields are currently not supported.
+
+## License
+Licensed under the Mozilla Public License Version 2.0.
