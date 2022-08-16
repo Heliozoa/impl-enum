@@ -1,4 +1,5 @@
-//! Macro for generating methods on an enum that match on the enum and call the same method on each variant.
+//! Macro for generating methods on an enum that match on the enum
+//! and call the same method on each variant.
 //!
 //! ## Example
 //! ```rust
@@ -61,19 +62,26 @@
 //!     }
 //! }
 //! ```
-//! This would be simple enough to write manually in this case, but with many variants and methods, maintaining such an impl can become tedious. The macro is intended to make such an enum easier to work with.
+//! This would be simple enough to write manually in this case,
+//! but with many variants and methods, maintaining such an impl can become tedious.
+//! The macro is intended to make such an enum easier to work with.
 //!
-//! Variants with named fields and multiple fields are also supported, the method is always called on the first field and the rest are ignored. Enums with variants with no fields are currently not supported.
+//! Variants with named fields and multiple fields are also supported,
+//! the method is always called on the first field and the rest are ignored.
+//! Enums with variants with no fields are currently not supported.
 
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::ToTokens;
 use syn::{
     parse::{Error, Parse, ParseStream},
     spanned::Spanned,
-    Fields, FnArg, ItemEnum, ItemFn, Receiver, Signature, Visibility,
+    Fields, FnArg, ItemEnum, Receiver, Signature, Visibility,
 };
 
-/// Generates an impl block for an enum containing the given methods, where the method is a simple match over all the variants, calling the same method on the matched variant's first field.
+/// Generates an impl block for an enum containing the given methods,
+/// where the method is a simple match over all the variants,
+/// calling the same method on the matched variant's first field.
 #[proc_macro_attribute]
 pub fn with_methods(arg: TokenStream, input: TokenStream) -> TokenStream {
     let input_methods = syn::parse_macro_input!(arg as Methods);
@@ -120,73 +128,72 @@ impl Parse for Methods {
     }
 }
 
-fn make_method(vis: Visibility, mut sig: Signature, input_enum: &ItemEnum) -> syn::Result<ItemFn> {
-    let method_ident = &sig.ident;
-
-    // turn receivers to __first
+fn make_method(
+    vis: Visibility,
+    mut sig: Signature,
+    input_enum: &ItemEnum,
+) -> syn::Result<TokenStream2> {
+    // turn receivers to __first for the call
     let method_call_args: Vec<_> = sig
         .inputs
         .iter()
         .map(|fa| match fa {
             FnArg::Typed(t) => t.pat.to_token_stream(),
-            FnArg::Receiver(Receiver { .. }) => quote::quote! { __first },
+            FnArg::Receiver(Receiver { self_token, .. }) => {
+                quote::quote_spanned! { self_token.span() =>  __first }
+            }
         })
         .collect();
-    // add receiver if none
+    // add receiver if none for the signature
     if sig.receiver().is_none() {
         sig.inputs
-            .insert(0, syn::parse(quote::quote! {&self}.into()).unwrap());
+            .insert(0, syn::parse_quote_spanned!(sig.inputs.span() => &self));
     }
 
     // make match arm for every variant
     let mut match_arms = vec![];
     for variant in &input_enum.variants {
-        let variant_ident = &variant.ident;
-        let field = match &variant.fields {
-            Fields::Named(fields) => fields.named.first().ok_or_else(|| {
-                Error::new(fields.span(), "Enum variants must have at least one field")
-            })?,
-            Fields::Unnamed(fields) => fields.unnamed.first().ok_or_else(|| {
-                Error::new(fields.span(), "Enum variants must have at least one field")
-            })?,
-            // no fields, error
+        let first_field = match &variant.fields {
+            Fields::Named(fields) => fields.named.first(),
+            Fields::Unnamed(fields) => fields.unnamed.first(),
             Fields::Unit => {
                 return Err(Error::new(
                     variant.span(),
                     "Unit variants are not supported",
                 ))
             }
-        };
-        let first_field_ident = &field.ident;
-        let first_field_type = &field.ty;
-        let match_arm = if let Some(first_field_ident) = first_field_ident {
+        }
+        .ok_or_else(|| {
+            Error::new(
+                variant.fields.span(),
+                "Enum variants must have at least one field",
+            )
+        })?;
+
+        let variant_ident = &variant.ident;
+        let first_field_type = &first_field.ty;
+        let method_ident = &sig.ident;
+        let match_arm = if let Some(first_field_ident) = &first_field.ident {
             quote::quote! {
-                    Self::#variant_ident { #first_field_ident: __first, .. } => <#first_field_type> :: #method_ident (#(#method_call_args),* )
+                Self::#variant_ident { #first_field_ident: __first, .. }
+                    => <#first_field_type> :: #method_ident (#(#method_call_args),* )
             }
         } else {
             quote::quote! {
-                    Self::#variant_ident ( __first, .. ) => <#first_field_type> :: #method_ident (#(#method_call_args),* )
+                Self::#variant_ident ( __first, .. )
+                    => <#first_field_type> :: #method_ident (#(#method_call_args),* )
             }
         };
         match_arms.push(match_arm);
     }
 
     // generate new block for the function
-    let block = syn::parse(
-        quote::quote!(
-            {
-                match self {
-                    #(#match_arms),*
-                }
+    let method = quote::quote! {
+        #vis #sig {
+            match self {
+                #(#match_arms),*
             }
-        )
-        .into(),
-    )?;
-    let method = ItemFn {
-        attrs: vec![],
-        vis,
-        sig,
-        block: Box::new(block),
+        }
     };
     Ok(method)
 }
