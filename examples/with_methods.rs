@@ -1,10 +1,11 @@
 //! The variant of the writer is dynamically selected with an environment variable.
 //! Using the macro, we get the convenience of a trait object with the performance of an enum.
 
-use std::env;
-use std::fs::File;
-use std::io::Cursor;
-use std::io::Write;
+use std::{
+    env,
+    fs::File,
+    io::{Cursor, Write},
+};
 
 #[impl_enum::with_methods {
     fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error> {}
