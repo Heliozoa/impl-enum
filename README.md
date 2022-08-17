@@ -1,8 +1,8 @@
 # impl-enum
 
-![Crates.io](https://img.shields.io/crates/v/impl-enum)
-![docs.rs](https://img.shields.io/docsrs/impl-enum)
-![Crates.io](https://img.shields.io/crates/l/impl-enum)
+[![Crates.io](https://img.shields.io/crates/v/impl-enum)](https://crates.io/crates/impl-enum)
+[![docs.rs](https://img.shields.io/docsrs/impl-enum)](https://docs.rs/impl-enum)
+[![Crates.io](https://img.shields.io/crates/l/impl-enum)](https://choosealicense.com/licenses/mpl-2.0/)
 
 Contains a proc macro attribute `impl_enum::with_methods` for generating methods on an enum that call the same method on each variant.
 
