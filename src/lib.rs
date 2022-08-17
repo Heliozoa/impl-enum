@@ -1,5 +1,4 @@
 mod as_dyn;
-mod as_ref;
 mod with_methods;
 
 use proc_macro::TokenStream;
@@ -15,9 +14,4 @@ pub fn with_methods(arg: TokenStream, input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn as_dyn(arg: TokenStream, input: TokenStream) -> TokenStream {
     as_dyn::as_dyn_impl(arg, input)
-}
-
-#[proc_macro_attribute]
-pub fn as_ref(arg: TokenStream, input: TokenStream) -> TokenStream {
-    as_ref::as_ref_impl(arg, input)
 }
