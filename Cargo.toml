@@ -4,7 +4,7 @@ version = "0.3.0"
 authors = ["Heliozoa <daniel.x.martinez@helsinki.fi>"]
 edition = "2021"
 rust-version = "1.56"
-description = "Macro for generating methods on an enum that match on the enum and call the same method on each variant."
+description = "Macros that make using enums like trait objects more convenient."
 readme = "README.md"
 repository = "https://github.com/Heliozoa/impl-enum"
 license = "MPL-2.0"
@@ -15,8 +15,24 @@ resolver = "2"
 [lib]
 proc-macro = true
 
+[features]
+default = ["with_methods", "as_dyn"]
+with_methods = []
+as_dyn = []
+
+[[example]]
+name = "as_dyn"
+path = "examples/as_dyn.rs"
+required-features = ["as_dyn"]
+
+[[example]]
+name = "with_methods"
+path = "examples/with_methods.rs"
+required-features = ["with_methods"]
+
 [dependencies]
 heck = "0.4.0"
 proc-macro2 = "1.0.43"
+# full: using types like syn::Signature
 syn = { version = "1.0.99", features = ["full"] }
 quote = "1.0.21"

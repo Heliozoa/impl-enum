@@ -1,3 +1,5 @@
+#![cfg(feature = "with_methods")]
+
 use std::collections::HashSet;
 
 #[impl_enum::with_methods {

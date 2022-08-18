@@ -1,5 +1,5 @@
 //! The variant of the writer is dynamically selected with an environment variable.
-//! Using the macro, we get the convenience of a trait object with the performance of an enum.
+//! Using the macro, we can use the enum with the convenience of a trait object.
 
 use std::{
     env,
@@ -8,12 +8,12 @@ use std::{
 };
 
 #[impl_enum::with_methods {
-    pub fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error>
-    pub fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error>
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()>
+    pub fn write(&mut self, buf: &[u8]) -> std::io::Result<usize>
 }]
-enum Writer {
+pub enum Writer {
     Cursor(Cursor<Vec<u8>>),
-    File { file: std::fs::File },
+    File { file: File },
 }
 
 fn get_writer() -> Writer {

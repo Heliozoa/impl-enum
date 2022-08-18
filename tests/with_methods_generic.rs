@@ -1,3 +1,5 @@
+#![cfg(feature = "with_methods")]
+
 use impl_enum::with_methods;
 
 trait A {

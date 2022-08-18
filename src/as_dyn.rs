@@ -1,19 +1,49 @@
 use heck::ToSnakeCase;
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
-use syn::{spanned::Spanned, Error, Fields, ItemEnum, Path};
+use syn::{
+    parse::{Parse, ParseStream},
+    token::Comma,
+    Error, ItemEnum, Path,
+};
 
 pub fn as_dyn_impl(arg: TokenStream, input: TokenStream) -> TokenStream {
-    let path = syn::parse_macro_input!(arg as Path);
+    let paths = syn::parse_macro_input!(arg as Paths);
     let input_enum = syn::parse_macro_input!(input as ItemEnum);
 
-    // construct the methods
-    let (as_arms, into_arms) = match make_arms(&input_enum) {
-        Ok(match_arms) => match_arms,
-        Err(err) => return err.into_compile_error().into(),
-    };
+    let mut enum_impls = vec![];
+    for path in paths.0 {
+        match make_impl(&path, &input_enum) {
+            Ok(enum_impl) => enum_impls.push(enum_impl),
+            Err(err) => return err.into_compile_error().into(),
+        };
+    }
 
-    // construct the impl
+    TokenStream::from(quote::quote! {
+        #input_enum
+        #(#enum_impls)*
+    })
+}
+
+struct Paths(Vec<Path>);
+
+impl Parse for Paths {
+    fn parse(input: ParseStream) -> Result<Self, Error> {
+        // loop over the input and parse paths
+        let paths = input
+            .parse_terminated::<Path, Comma>(Path::parse)?
+            .into_iter()
+            .collect();
+
+        Ok(Paths(paths))
+    }
+}
+
+fn make_impl(path: &Path, input_enum: &ItemEnum) -> syn::Result<TokenStream2> {
+    // construct the arms
+    let (as_arms, into_arms) = make_arms(&input_enum)?;
+
+    // construct the function names
     let target_ident = path
         .segments
         .last()
@@ -25,6 +55,7 @@ pub fn as_dyn_impl(arg: TokenStream, input: TokenStream) -> TokenStream {
     let as_dyn_mut = Ident::new(&format!("as_dyn_{target_ident}_mut"), Span::call_site());
     let into_dyn = Ident::new(&format!("into_dyn_{target_ident}"), Span::call_site());
 
+    // construct the impl
     let enum_ident = &input_enum.ident;
     let (impl_generics, ty_generics, where_clause) = &input_enum.generics.split_for_impl();
     let enum_impl = quote::quote! {
@@ -46,11 +77,7 @@ pub fn as_dyn_impl(arg: TokenStream, input: TokenStream) -> TokenStream {
             }
         }
     };
-
-    TokenStream::from(quote::quote! {
-        #input_enum
-        #enum_impl
-    })
+    Ok(enum_impl)
 }
 
 fn make_arms(input_enum: &ItemEnum) -> syn::Result<(Vec<TokenStream2>, Vec<TokenStream2>)> {
@@ -58,22 +85,7 @@ fn make_arms(input_enum: &ItemEnum) -> syn::Result<(Vec<TokenStream2>, Vec<Token
     let mut into_arms = vec![];
 
     for variant in &input_enum.variants {
-        let first_field = match &variant.fields {
-            Fields::Named(fields) => fields.named.first(),
-            Fields::Unnamed(fields) => fields.unnamed.first(),
-            Fields::Unit => {
-                return Err(Error::new(
-                    variant.span(),
-                    "Unit variants are not supported",
-                ))
-            }
-        }
-        .ok_or_else(|| {
-            Error::new(
-                variant.fields.span(),
-                "Enum variants must have at least one field",
-            )
-        })?;
+        let first_field = super::first_field(variant)?;
 
         let variant_ident = &variant.ident;
         if let Some(first_field_ident) = &first_field.ident {

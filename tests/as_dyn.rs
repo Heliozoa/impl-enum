@@ -1,3 +1,6 @@
+#![cfg(feature = "as_dyn")]
+#![allow(dead_code)]
+
 struct A;
 struct B;
 struct C;

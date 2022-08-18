@@ -1,82 +1,10 @@
-//! Macro for generating methods on an enum that match on the enum
-//! and call the same method on each variant.
-//!
-//! ## Example
-//! ```rust
-//! // The variant of the writer is dynamically selected with an environment variable.
-//! // Using the macro, we get the convenience of a trait object with the performance of an enum.
-//!
-//! use std::env;
-//! use std::fs::File;
-//! use std::io::Cursor;
-//! use std::io::Write;
-//!
-//! #[impl_enum::with_methods {
-//!     fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error>
-//!     pub fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error>
-//! }]
-//! enum Writer {
-//!     Cursor(Cursor<Vec<u8>>),
-//!     File(File),
-//! }
-//!
-//! fn get_writer() -> Writer {
-//!     if let Ok(path) = env::var("WRITER_FILE") {
-//!         Writer::File(File::create(path).unwrap())
-//!     } else {
-//!         Writer::Cursor(Cursor::new(vec![]))
-//!     }
-//! }
-//!
-//! fn main() {
-//!     let mut writer = get_writer();
-//!     writer.write_all(b"hello!").unwrap();
-//! }
-//! ```
-//!
-//! The macro generates an impl block for the Writer enum equivalent to
-//!
-//! ```rust
-//! # use std::fs::File;
-//! # use std::io::Cursor;
-//! # use std::io::Write;
-//! #
-//! # enum Writer {
-//! #     Cursor(Cursor<Vec<u8>>),
-//! #     File(File),
-//! # }
-//! #
-//! impl Writer {
-//!     fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error> {
-//!         match self {
-//!             Self::Cursor(cursor) => cursor.write_all(buf),
-//!             Self::File(file) => file.write_all(buf),
-//!         }
-//!     }
-//!
-//!     pub fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-//!         match self {
-//!             Self::Cursor(cursor) => cursor.write(buf),
-//!             Self::File(file) => file.write(buf),
-//!         }
-//!     }
-//! }
-//! ```
-//! This would be simple enough to write manually in this case,
-//! but with many variants and methods, maintaining such an impl can become tedious.
-//! The macro is intended to make such an enum easier to work with.
-//!
-//! Variants with named fields and multiple fields are also supported,
-//! the method is always called on the first field and the rest are ignored.
-//! Enums with variants with no fields are currently not supported.
-
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::ToTokens;
 use syn::{
     parse::{Error, Parse, ParseStream},
     spanned::Spanned,
-    Fields, FnArg, ItemEnum, Receiver, Signature, Visibility,
+    FnArg, ItemEnum, Receiver, Signature, Visibility,
 };
 
 pub fn with_methods_impl(arg: TokenStream, input: TokenStream) -> TokenStream {
@@ -111,8 +39,8 @@ pub fn with_methods_impl(arg: TokenStream, input: TokenStream) -> TokenStream {
 struct Methods(Vec<(Visibility, Signature)>);
 
 impl Parse for Methods {
-    // loop over the input and try to parse functions
     fn parse(input: ParseStream) -> Result<Self, Error> {
+        // loop over the input and parse functions
         let mut methods = vec![];
         while !input.is_empty() {
             let vis: Visibility = input.parse()?;
@@ -129,8 +57,8 @@ fn make_method(
     mut sig: Signature,
     input_enum: &ItemEnum,
 ) -> syn::Result<TokenStream2> {
-    // turn receivers to __first for the call
-    let method_call_args: Vec<_> = sig
+    // rename receivers to __first for the call
+    let method_call_args = sig
         .inputs
         .iter()
         .map(|fa| match fa {
@@ -139,32 +67,16 @@ fn make_method(
                 quote::quote_spanned! { self_token.span() =>  __first }
             }
         })
-        .collect();
-    // add receiver if none for the signature
+        .collect::<Vec<_>>();
+    // add &self receiver if none for the signature
     if sig.receiver().is_none() {
-        sig.inputs
-            .insert(0, syn::parse_quote_spanned!(sig.inputs.span() => &self));
+        sig.inputs.insert(0, syn::parse_quote!(&self));
     }
 
     // make match arm for every variant
     let mut match_arms = vec![];
     for variant in &input_enum.variants {
-        let first_field = match &variant.fields {
-            Fields::Named(fields) => fields.named.first(),
-            Fields::Unnamed(fields) => fields.unnamed.first(),
-            Fields::Unit => {
-                return Err(Error::new(
-                    variant.span(),
-                    "Unit variants are not supported",
-                ))
-            }
-        }
-        .ok_or_else(|| {
-            Error::new(
-                variant.fields.span(),
-                "Enum variants must have at least one field",
-            )
-        })?;
+        let first_field = super::first_field(variant)?;
 
         let variant_ident = &variant.ident;
         let first_field_type = &first_field.ty;
