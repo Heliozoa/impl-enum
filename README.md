@@ -132,7 +132,8 @@ impl Writer {
 }
 ```
 
-
+## Alternatives
+- https://crates.io/crates/ambassador
 
 ## License
 Licensed under the Mozilla Public License Version 2.0.
