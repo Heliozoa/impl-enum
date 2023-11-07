@@ -3,8 +3,7 @@ use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use syn::{
     parse::{Parse, ParseStream},
-    token::Comma,
-    Error, ItemEnum, Path,
+    Error, ItemEnum, Path, Token,
 };
 
 pub fn as_dyn_impl(arg: TokenStream, input: TokenStream) -> TokenStream {
@@ -31,7 +30,7 @@ impl Parse for Paths {
     fn parse(input: ParseStream) -> Result<Self, Error> {
         // loop over the input and parse paths
         let paths = input
-            .parse_terminated::<Path, Comma>(Path::parse)?
+            .parse_terminated(Path::parse, Token![,])?
             .into_iter()
             .collect();
 
